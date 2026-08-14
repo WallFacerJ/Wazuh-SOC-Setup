@@ -278,3 +278,84 @@ C:\Program Files (x86)\ossec-agent\ossec.log
 ---
 
 > Documented for home lab engineering, digital forensics, and SOC infrastructure setups.
+
+---
+
+## 🐧 Phase 7: Linux Endpoint Deployment
+
+**Steps Taken:**
+- Prepared a Linux VM (Kali Linux) on the Bridged Network.
+- Generated the deployment script via Wazuh Dashboard.
+- Installed and started the `wazuh-agent` service.
+- Verified real-time log collection in the dashboard.
+
+> ![alt text](screenshots/Wazuh%201.png)
+
+---
+
+## 📁 Phase 8: File Integrity Monitoring (FIM)
+
+File Integrity Monitoring is a core Wazuh module that detects changes (creations, modifications, deletions) to files or directories. While Wazuh monitors some critical system files by default, we will configure it to monitor specific test directories in real-time on both our Windows and Kali endpoints to validate that our alerts are functioning.
+
+**Windows `ossec.conf` Configuration:**
+> ![alt text](screenshots/windows_fim_config.png)
+
+**Linux `ossec.conf` Configuration:**
+> ![alt text](screenshots/linux_fim_config.png)
+
+**FIM Validation Alerts:**
+Creating, modifying, and deleting files within these directories immediately generated Level 5 (File Added) and Level 7 (Integrity Checksum Changed / File Deleted) alerts in the Wazuh Integrity Monitoring module.
+> ![alt text](screenshots/fim_alert_dashboard.png)
+
+---
+
+## 🛡️ Phase 9: Windows Defender Integration
+
+To achieve comprehensive monitoring, Wazuh must be able to ingest native Windows Defender event logs. We will configure the Windows agent to read from the Defender Event Channel, allowing Wazuh to generate alerts whenever Defender detects malware or takes action.
+
+**Defender Configuration in `ossec.conf`:**
+> ![alt text](screenshots/defender_config.png)
+
+**Defender Validation Alert:**
+When the EICAR standard antivirus test file was downloaded, Windows Defender blocked it. Wazuh immediately parsed the Defender log, generating a **Severe** security alert natively in the dashboard.
+> ![alt text](screenshots/defender_alert_dashboard.pn.png)
+
+---
+
+## 👁️ Phase 10: Sysmon Installation & Integration
+
+While default Windows event logs are helpful, they lack deep visibility into process creations, network connections, and file modifications. System Monitor (Sysmon) by Microsoft Sysinternals provides this advanced telemetry. We will install Sysmon with a robust community configuration and forward its logs to Wazuh.
+
+**Sysmon Installation via PowerShell:**
+> ![alt text](screenshots/sysmon_install.png)
+
+**Sysmon Configuration in `ossec.conf`:**
+The Sysmon Operational event channel was mapped into the Wazuh agent to forward all deep system telemetry to the SOC.
+> ![alt text](screenshots/sysmon_config.png)
+
+**Errors Encountered & Resolved:**
+- **Error:** When filtering for `rule.groups: sysmon` in the Discover tab, the dashboard returned "No Results".
+- **Root Cause:** Wazuh ingests Sysmon logs perfectly, but by default, most routine Sysmon events (like opening a normal program) are scored at Level 3 or below. The Wazuh Dashboard (specifically the `wazuh-alerts-*` index) only displays events that are Level 3 or higher. 
+- **Resolution:** Moved directly to custom rules to elevate the alert level.
+
+---
+
+## 🚨 Phase 11: Custom Detection Rules
+
+To maximize the value of our integrations (FIM, Defender, and Sysmon), we need to write custom XML detection rules on the Wazuh Server. These rules tell the Wazuh Manager to flag specific behaviors as high-priority security incidents.
+
+**Custom Rule Implementation (`local_rules.xml`):**
+The custom rule was designed to detect any Sysmon Event ID 1 (Process Creation) and elevate it to a Level 8 alert.
+> ![alt text](screenshots/custom_rule.png)
+
+**Custom Rule Validation:**
+Upon launching applications like `Fastfetch.exe` and `powershell.exe` on the Windows endpoint, the custom rule successfully triggered. This validates that Sysmon telemetry is flowing properly and the Wazuh decoding engine is successfully correlating the events.
+> ![alt text](screenshots/custom_alert_dashboard.png)
+
+**Errors Encountered & Resolved (General):**
+- **Error:** When attempting to open the `ossec.conf` file on Windows, a "File not found" error occurred.
+- **Root Cause:** Incorrectly typing `(x86)` in the file name field instead of navigating to the correct directory path (`C:\Program Files (x86)\ossec-agent\`).
+- **Resolution:** Used an administrative PowerShell/Command Prompt to directly open the file by running `notepad "C:\Program Files (x86)\ossec-agent\ossec.conf"`.
+- **Error:** When running `Restart-Service -Name WazuhSvc`, PowerShell returned `Cannot stop WazuhSvc service`.
+- **Root Cause:** The Wazuh background process occasionally hangs in Windows when attempting to stop gracefully, usually while holding onto log file handles.
+- **Resolution:** Force-killed the process using `Stop-Process` and then started the service fresh.
